@@ -37,3 +37,63 @@ for lb in labels:
     print(f"Centre :    {centroid}")
     print(f"BBox (idx,size) : {bbox}")
     print()
+
+
+à ajouter
+
+import SimpleITK as sitk
+
+def classify_shape(principal_axes):
+    """
+    Déduit la forme à partir des axes principaux (longueurs A >= B >= C).
+    """
+    A, B, C = principal_axes
+
+    ratio_AB = A / B if B > 0 else float("inf")
+    ratio_AC = A / C if C > 0 else float("inf")
+    ratio_BC = B / C if C > 0 else float("inf")
+
+    # Critères
+    if ratio_AB < 1.5 and ratio_AC < 1.5:
+        return "sphérique"
+
+    if ratio_AC > 2.5 and ratio_AB > 1.5:
+        return "allongée (en tige)"
+
+    if ratio_BC > 2.5 and ratio_AB < 1.2:
+        return "plate (compressée)"
+
+    return "irrégulière"
+
+# -------------------------
+# Charger le volume binaire
+# -------------------------
+binary_path = "binary_volume.nii.gz"   # 1 = blanc, 0 = noir
+
+img = sitk.ReadImage(binary_path)
+binary = sitk.Cast(sitk.NotEqual(img, 0), sitk.sitkUInt8)
+
+# --------------------------------
+# Extraction des objets connectés
+# --------------------------------
+cc = sitk.ConnectedComponent(binary)
+stats = sitk.LabelShapeStatisticsImageFilter()
+stats.Execute(cc)
+
+labels = stats.GetLabels()
+
+print(f"Nombre d’objets détectés : {len(labels)}\n")
+
+for lb in labels:
+    vol = stats.GetPhysicalSize(lb)
+    centroid = stats.GetCentroid(lb)
+    principal_axes = stats.GetPrincipalAxes(lb)  # A, B, C
+
+    shape = classify_shape(principal_axes)
+
+    print(f"=== Objet {lb} ===")
+    print(f"Volume      : {vol:.2f} mm³")
+    print(f"Centre      : {centroid}")
+    print(f"Axes (A,B,C): {principal_axes}")
+    print(f"Forme       : {shape}")
+    print()

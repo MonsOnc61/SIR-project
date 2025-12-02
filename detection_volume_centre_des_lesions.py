@@ -1,6 +1,6 @@
 import SimpleITK as sitk
 
-binary_path = "binary_volume.nii.gz"   # 1 = blanc, 0 = noir
+binary_path = "binary_volume.nii.gz"
 
 img = sitk.ReadImage(binary_path)
 

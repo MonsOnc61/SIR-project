@@ -18,31 +18,6 @@ if len(labels) == 0:
     print("Aucune partie blanche détectée.")
     exit()
 
-print("===================================")
-print("        ANALYSE DU VOLUME")
-print("===================================")
-print(f"Nombre de parties blanches : {len(labels)}")
-
-total_volume = sum(stats.GetPhysicalSize(lb) for lb in labels)
-print(f"Volume total (mm^3) : {total_volume:.2f}")
-print()
-
-for lb in labels:
-    vol = stats.GetPhysicalSize(lb)
-    centroid = stats.GetCentroid(lb)
-    bbox = stats.GetBoundingBox(lb)
-
-    print(f"--- Partie {lb} ---")
-    print(f"Volume :    {vol:.2f} mm^3")
-    print(f"Centre :    {centroid}")
-    print(f"BBox (idx,size) : {bbox}")
-    print()
-
-
-à ajouter
-
-import SimpleITK as sitk
-
 def classify_shape(principal_axes):
     """
     Déduit la forme à partir des axes principaux (longueurs A >= B >= C).
@@ -65,35 +40,25 @@ def classify_shape(principal_axes):
 
     return "irrégulière"
 
-# -------------------------
-# Charger le volume binaire
-# -------------------------
-binary_path = "binary_volume.nii.gz"   # 1 = blanc, 0 = noir
+print("===================================")
+print("        ANALYSE DU VOLUME")
+print("===================================")
+print(f"Nombre de parties blanches : {len(labels)}")
 
-img = sitk.ReadImage(binary_path)
-binary = sitk.Cast(sitk.NotEqual(img, 0), sitk.sitkUInt8)
-
-# --------------------------------
-# Extraction des objets connectés
-# --------------------------------
-cc = sitk.ConnectedComponent(binary)
-stats = sitk.LabelShapeStatisticsImageFilter()
-stats.Execute(cc)
-
-labels = stats.GetLabels()
-
-print(f"Nombre d’objets détectés : {len(labels)}\n")
+total_volume = sum(stats.GetPhysicalSize(lb) for lb in labels)
+print(f"Volume total (mm^3) : {total_volume:.2f}")
+print()
 
 for lb in labels:
     vol = stats.GetPhysicalSize(lb)
     centroid = stats.GetCentroid(lb)
+    bbox = stats.GetBoundingBox(lb)
+
+    print(f"--- Partie {lb} ---")
+    print(f"Volume :    {vol:.2f} mm^3")
+    print(f"Centre :    {centroid}")
+    print(f"BBox (idx,size) : {bbox}")
     principal_axes = stats.GetPrincipalAxes(lb)  # A, B, C
-
     shape = classify_shape(principal_axes)
-
-    print(f"=== Objet {lb} ===")
-    print(f"Volume      : {vol:.2f} mm³")
-    print(f"Centre      : {centroid}")
-    print(f"Axes (A,B,C): {principal_axes}")
     print(f"Forme       : {shape}")
     print()

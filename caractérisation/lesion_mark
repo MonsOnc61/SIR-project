@@ -58,7 +58,7 @@ for lb in labels:
     print(f"Volume :    {vol:.2f} mm^3")
     print(f"Centre :    {centroid}")
     print(f"BBox (idx,size) : {bbox}")
-    principal_axes = stats.GetPrincipalAxes(lb)  # A, B, C
+    principal_axes = stats.GetPrincipalMoments(lb)
     shape = classify_shape(principal_axes)
     print(f"Forme       : {shape}")
     print()

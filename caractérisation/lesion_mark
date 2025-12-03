@@ -12,7 +12,7 @@ cc = cc_filter.Execute(binary)
 stats = sitk.LabelShapeStatisticsImageFilter()
 stats.Execute(cc)
 
-labels = stats.GetLabels()
+labels = list(range(1, cc_filter.GetObjectCount() + 1))
 
 if len(labels) == 0:
     print("Aucune partie blanche détectée.")

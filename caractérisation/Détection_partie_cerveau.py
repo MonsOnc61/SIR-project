@@ -32,7 +32,7 @@ freesurfer_aseg_labels = {
     43: "Right-Lateral-Ventricle",
     44: "Right-Inf-Lat-Vent",
     46: "Right-Cerebellum-White-Matter",
-    47: "Right-Cerebellum-Cortex",
+    47: "Right-Cerebellum-Cortex", 
     49: "Right-Thalamus",
     50: "Right-Caudate",
     51: "Right-Putamen",

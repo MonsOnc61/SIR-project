@@ -1,38 +1,41 @@
 import SimpleITK as sitk
 import numpy as np
-import math
-import csv
 import os
+import csv
+import cv2
 import imageio.v2 as imageio
 
-# =========================
-# Réglages
-# =========================
+# ============================================================
+# PARAMÈTRES
+# ============================================================
 MASK_PATH = "MSLesSeg_Dataset/train/P1/T1/P1_T1_MASK.nii.gz"
-OUT_CSV = "Output/P1_lesions_features_with_tchebichef.csv"
+OUT_CSV = "Output/P1_lesions_features_tchebichef.csv"
 OUT_RECON_DIR = "Output/reconstructions"
 
-FOURIER_K = 12
-LEGENDRE_N = 3
-CHEBYSHEV_N = 3
-TCHEB_N = 6        # ordre Tchebichef (clé pour reconstruction)
-
+ROI_SIZE = 64          # taille canonique (invariance échelle)
+TCHEB_N = 20           # ordre moments
+SIGMA_DISTANCE = 3.0
 CSV_DELIM = ";"
 
 os.makedirs(OUT_RECON_DIR, exist_ok=True)
 
-# =========================
-# Utils bbox
-# =========================
+# ============================================================
+# UTILS
+# ============================================================
 def bbox_from_mask(mask2d):
     ys, xs = np.where(mask2d > 0)
     if len(xs) == 0:
         return None
-    return xs.min(), ys.min(), xs.max()-xs.min()+1, ys.max()-ys.min()+1
+    return xs.min(), ys.min(), xs.max() - xs.min() + 1, ys.max() - ys.min() + 1
 
-# =========================
-# Polynômes Tchebichef discrets
-# =========================
+def resize_roi(mask, size):
+    return cv2.resize(mask.astype(np.float64),
+                      (size, size),
+                      interpolation=cv2.INTER_NEAREST)
+
+# ============================================================
+# POLYNÔMES DE TCHEBICHEF DISCRETS
+# ============================================================
 def tchebichef_poly(p, x, N):
     if p == 0:
         return np.ones_like(x, dtype=np.float64)
@@ -48,151 +51,154 @@ def tchebichef_poly(p, x, N):
         t0, t1 = t1, t2
     return t1
 
-# =========================
-# Moments de Tchebichef 2D
-# =========================
-def tchebichef_moments(mask2d, N=6):
+def tchebichef_norm(p, N):
+    x = np.arange(N)
+    tp = tchebichef_poly(p, x, N)
+    return np.sum(tp * tp)
+
+# ============================================================
+# MOMENTS DE TCHEBICHEF 2D (CORRECTS)
+# ============================================================
+def tchebichef_moments(mask2d, N, roi_size):
     bb = bbox_from_mask(mask2d)
     if bb is None:
-        return [0.0]*(N*N), None
+        return None, None
 
-    x0,y0,w,h = bb
+    x0, y0, w, h = bb
     roi = mask2d[y0:y0+h, x0:x0+w].astype(np.float64)
 
-    xs = np.arange(w)
-    ys = np.arange(h)
+    roi = resize_roi(roi, roi_size)
 
-    feats = []
+    xs = np.arange(roi_size)
+    ys = np.arange(roi_size)
+
+    moments = np.zeros((N, N), dtype=np.float64)
+
     for p in range(N):
-        tp = tchebichef_poly(p, xs, w)
+        tp = tchebichef_poly(p, xs, roi_size)
+        np_p = tchebichef_norm(p, roi_size)
+
         for q in range(N):
-            tq = tchebichef_poly(q, ys, h)
-            feats.append(float(np.sum(roi * tq[:,None] * tp[None,:])))
+            tq = tchebichef_poly(q, ys, roi_size)
+            np_q = tchebichef_norm(q, roi_size)
 
-    denom = max(1.0, np.sum(roi))
-    feats = [v/denom for v in feats]
-    return feats, bb
+            moments[p, q] = np.sum(roi * tq[:, None] * tp[None, :]) / (np_p * np_q)
 
-# =========================
-# Reconstruction Tchebichef
-# =========================
-def reconstruct_from_tchebichef(moments, w, h, N):
-    recon = np.zeros((h, w), dtype=np.float64)
+    return moments.flatten(), bb
+
+# ============================================================
+# RECONSTRUCTION
+# ============================================================
+def reconstruct_from_tchebichef(moments, size, N):
+    recon = np.zeros((size, size), dtype=np.float64)
     idx = 0
-    xs = np.arange(w)
-    ys = np.arange(h)
+    xs = np.arange(size)
+    ys = np.arange(size)
 
     for p in range(N):
-        tp = tchebichef_poly(p, xs, w)
+        tp = tchebichef_poly(p, xs, size)
         for q in range(N):
-            tq = tchebichef_poly(q, ys, h)
-            recon += moments[idx] * tq[:,None] * tp[None,:]
+            tq = tchebichef_poly(q, ys, size)
+            recon += moments[idx] * tq[:, None] * tp[None, :]
             idx += 1
 
     recon -= recon.min()
-    if recon.max() > 1e-12:
-        recon /= recon.max()
+    recon /= recon.max() + 1e-12
     return recon
 
-# =========================
-# Distance de forme (article)
-# =========================
-def shape_distance(m, ref, sigma=2.0):
+def binarize_reconstruction(recon):
+    vals = recon[recon > 0]
+    if len(vals) == 0:
+        return np.zeros_like(recon, dtype=np.uint8)
+    th = np.percentile(vals, 70)
+    return (recon > th).astype(np.uint8)
+
+# ============================================================
+# DISTANCE DE FORME
+# ============================================================
+def shape_distance(m, ref, sigma):
     m = np.array(m)
     ref = np.array(ref)
     P = int(np.sqrt(len(m)))
 
-    weights = []
+    d = 0.0
+    idx = 0
     for p in range(P):
         for q in range(P):
-            weights.append(np.exp(-((p+q)**2)/(2*sigma*sigma)))
-    weights = np.array(weights)
+            w = np.exp(-(p*p + q*q) / (2*sigma*sigma))
+            d += w * (m[idx] - ref[idx])**2
+            idx += 1
+    return float(d)
 
-    return float(np.sum(weights * (m-ref)**2))
-
-# =========================
-# Chargement masque
-# =========================
+# ============================================================
+# CHARGEMENT MASQUE
+# ============================================================
 mask_img = sitk.ReadImage(MASK_PATH)
-mask_bin = sitk.Cast(sitk.BinaryThreshold(mask_img, 0.5, 1e9, 1, 0), sitk.sitkUInt8)
+mask_bin = sitk.Cast(sitk.BinaryThreshold(mask_img, 0.5, 1e9, 1, 0),
+                     sitk.sitkUInt8)
 mask_arr = sitk.GetArrayFromImage(mask_bin)
-spacing = mask_bin.GetSpacing()
-sx, sy, sz = spacing
 
-# =========================
-# CC 3D
-# =========================
 cc = sitk.ConnectedComponent(mask_bin)
 cc_arr = sitk.GetArrayFromImage(cc)
 
 labels = np.unique(cc_arr)
 labels = labels[labels != 0]
 
-# =========================
-# Référence de forme (moyenne)
-# =========================
-all_tch = []
+# ============================================================
+# RÉFÉRENCE DE FORME (MOYENNE)
+# ============================================================
+all_moments = []
 
+for lab in labels:
+    lesion = (cc_arr == lab).astype(np.uint8)
+    best_z = np.argmax([np.sum(lesion[z]) for z in range(lesion.shape[0])])
+    mask2d = lesion[best_z]
+
+    m, _ = tchebichef_moments(mask2d, TCHEB_N, ROI_SIZE)
+    if m is not None:
+        all_moments.append(m)
+
+tch_ref = np.mean(np.array(all_moments), axis=0)
+
+# ============================================================
+# EXTRACTION FINALE
+# ============================================================
 rows = []
-
-for lab in labels:
-    lesion = (cc_arr == lab).astype(np.uint8)
-
-    best_z = np.argmax([np.sum(lesion[z]) for z in range(lesion.shape[0])])
-    mask2d = lesion[best_z]
-
-    tch, bb = tchebichef_moments(mask2d, TCHEB_N)
-    if bb is None:
-        continue
-
-    all_tch.append(tch)
-
-# moyenne = forme de référence
-tch_ref = np.mean(np.array(all_tch), axis=0)
-
-# =========================
-# Extraction finale
-# =========================
 lesion_id = 1
+
 for lab in labels:
     lesion = (cc_arr == lab).astype(np.uint8)
     best_z = np.argmax([np.sum(lesion[z]) for z in range(lesion.shape[0])])
     mask2d = lesion[best_z]
 
-    tch, bb = tchebichef_moments(mask2d, TCHEB_N)
-    if bb is None:
+    tch, bb = tchebichef_moments(mask2d, TCHEB_N, ROI_SIZE)
+    if tch is None:
         continue
 
-    x0,y0,w,h = bb
-    recon = reconstruct_from_tchebichef(tch, w, h, TCHEB_N)
+    recon = reconstruct_from_tchebichef(tch, ROI_SIZE, TCHEB_N)
+    recon_bin = binarize_reconstruction(recon)
 
-    recon_full = np.zeros_like(mask2d, dtype=np.float64)
-    recon_full[y0:y0+h, x0:x0+w] = recon
-    recon_bin = (recon_full > 0.5).astype(np.uint8)
-
-    # sauvegarde image
     imageio.imwrite(
         os.path.join(OUT_RECON_DIR, f"lesion_{lesion_id}_slice_{best_z}.png"),
-        (recon_full*255).astype(np.uint8)
+        (recon * 255).astype(np.uint8)
     )
 
-    # distance de forme
-    dist = shape_distance(tch, tch_ref)
+    dist = shape_distance(tch, tch_ref, SIGMA_DISTANCE)
 
     rows.append({
         "lesion_id": lesion_id,
         "slice_z": int(best_z),
         "shape_distance": dist,
-        **{f"tch_{i}": tch[i] for i in range(len(tch))}
+        **{f"tch_{i}": float(tch[i]) for i in range(len(tch))}
     })
 
     lesion_id += 1
 
-# =========================
+# ============================================================
 # CSV
-# =========================
-fieldnames = ["lesion_id","slice_z","shape_distance"] + \
-             [f"tch_{i}" for i in range(TCHEB_N*TCHEB_N)]
+# ============================================================
+fieldnames = ["lesion_id", "slice_z", "shape_distance"] + \
+             [f"tch_{i}" for i in range(TCHEB_N * TCHEB_N)]
 
 with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(f, fieldnames=fieldnames, delimiter=CSV_DELIM)
@@ -201,5 +207,5 @@ with open(OUT_CSV, "w", newline="", encoding="utf-8") as f:
         writer.writerow(r)
 
 print(f"OK – {len(rows)} lésions traitées")
-print(f"Reconstructions dans {OUT_RECON_DIR}")
-print(f"CSV écrit : {OUT_CSV}")
+print(f"Reconstructions : {OUT_RECON_DIR}")
+print(f"CSV : {OUT_CSV}")

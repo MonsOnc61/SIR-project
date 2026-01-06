@@ -2,7 +2,7 @@ import SimpleITK as sitk
 import numpy as np
 import os
 import csv
-import cv2
+from scipy.ndimage import zoom
 import imageio.v2 as imageio
 
 # ============================================================
@@ -29,9 +29,12 @@ def bbox_from_mask(mask2d):
     return xs.min(), ys.min(), xs.max() - xs.min() + 1, ys.max() - ys.min() + 1
 
 def resize_roi(mask, size):
-    return cv2.resize(mask.astype(np.float64),
-                      (size, size),
-                      interpolation=cv2.INTER_NEAREST)
+    h, w = mask.shape
+    zoom_y = size / h
+    zoom_x = size / w
+    return zoom(mask.astype(np.float64),
+                (zoom_y, zoom_x),
+                order=0)   # nearest-neighbor
 
 # ============================================================
 # POLYNÔMES DE TCHEBICHEF DISCRETS

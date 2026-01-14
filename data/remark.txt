@@ -1,0 +1,2 @@
+This folder is for all data we used, need to complete when the professors give a hard drive.
+Empty on Github because the data is too heavy.

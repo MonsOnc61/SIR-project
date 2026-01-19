@@ -208,3 +208,8 @@ __marimo__/
 
 # Data folders for SIR-project
 data/
+
+# CSV files in tchebychev_polynomial folder
+code/tchebychev_polynomial/2d/Moments_Extraction_Results/*
+code/tchebychev_polynomial/2d/Moments_Output/*
+code/tchebychev_polynomial/3d/Moments_Extraction_3D_Results/*
